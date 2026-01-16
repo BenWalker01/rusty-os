@@ -12,14 +12,7 @@ spin = "0.5.2"
 version = "1.0"
 features = ["spin_no_std"]
 
-
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
-
 [[bin]]
 name = "rusty_os"
-test = false
+test = true
 bench = false
