@@ -1,7 +1,7 @@
-use volatile::Volatile;
 use core::fmt;
 use lazy_static::lazy_static;
 use spin::Mutex;
+use volatile::Volatile;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +56,7 @@ pub struct Writer {
 }
 
 impl Writer {
-    pub fn write_byte(&mut self, byte: u8){
+    pub fn write_byte(&mut self, byte: u8) {
         match byte {
             b'\n' => self.new_line(),
             byte => {
@@ -66,24 +66,30 @@ impl Writer {
                 let row = BUFFER_HEIGHT - 1;
                 let col = self.column_position;
                 let colour_code = self.colour_code;
-                self.buffer.chars[row][col].write(ScreenChar { ascii_char: byte, colour_code });
+                self.buffer.chars[row][col].write(ScreenChar {
+                    ascii_char: byte,
+                    colour_code,
+                });
                 self.column_position += 1;
             }
         }
     }
-    fn new_line(&mut self){
+    fn new_line(&mut self) {
         for row in 1..BUFFER_HEIGHT {
             for col in 0..BUFFER_WIDTH {
                 let char = self.buffer.chars[row][col].read();
-                self.buffer.chars[row-1][col].write(char);
+                self.buffer.chars[row - 1][col].write(char);
             }
         }
         self.clear_row(BUFFER_HEIGHT - 1);
         self.column_position = 0;
     }
-    fn clear_row(&mut self, row:usize) {
-        let blank = ScreenChar { ascii_char: b' ', colour_code: self.colour_code,};
-        for col in 0..BUFFER_WIDTH{
+    fn clear_row(&mut self, row: usize) {
+        let blank = ScreenChar {
+            ascii_char: b' ',
+            colour_code: self.colour_code,
+        };
+        for col in 0..BUFFER_WIDTH {
             self.buffer.chars[row][col].write(blank);
         }
     }
