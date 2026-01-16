@@ -27,6 +27,10 @@ fn panic(info: &PanicInfo) -> ! {
 pub extern "C" fn _start() -> ! {
     println!("Hello World{}", "!");
 
+    rusty_os::init();
+
+    x86_64::instructions::interrupts::int3(); // breakpoint invocation
+
     #[cfg(test)]
     test_main();
 
