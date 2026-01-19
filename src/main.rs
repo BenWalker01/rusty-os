@@ -26,6 +26,15 @@ pub extern "C" fn _start() -> ! {
 
     rusty_os::init();
 
+    let ptr = 0x205070 as *mut u8;
+    unsafe {
+        let x = *ptr;
+    }
+    println!("Read worked");
+    unsafe {
+        *ptr = 42;
+    }
+    println!("Write worked");
 
     #[cfg(test)]
     test_main();
