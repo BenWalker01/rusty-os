@@ -11,7 +11,7 @@ use rusty_os::println;
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("{}", info);
-    loop {}
+    rusty_os::hlt_loop();
 }
 
 #[cfg(test)]
@@ -32,8 +32,5 @@ pub extern "C" fn _start() -> ! {
 
     println!("It did not crash!");
 
-    loop {
-        use rusty_os::print;
-        print!("-");
-    }
+    rusty_os::hlt_loop();
 }
