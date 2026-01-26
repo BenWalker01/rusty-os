@@ -1,4 +1,5 @@
 pub mod bump;
+pub mod linked_list;
 
 use alloc::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
