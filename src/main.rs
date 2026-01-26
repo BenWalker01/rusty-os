@@ -11,17 +11,13 @@ use core::panic::PanicInfo;
 use rusty_os::println;
 use alloc::{boxed::Box, vec, vec::Vec, rc::Rc};
 
-#[cfg(not(test))]
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    println!("{}", info);
-    rusty_os::hlt_loop();
+async fn async_number() -> u32 {
+    42
 }
 
-#[cfg(test)]
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    rusty_os::test_panic_handler(info)
+async fn example_task() {
+    let number = async_number().await;
+    println!("async number: {}", number);
 }
 
 entry_point!(kernel_main);
@@ -66,4 +62,17 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     println!("It did not crash!");
     rusty_os::hlt_loop();
+}
+
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    println!("{}", info);
+    rusty_os::hlt_loop();
+}
+
+#[cfg(test)]
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    rusty_os::test_panic_handler(info)
 }
