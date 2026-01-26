@@ -3,7 +3,6 @@ use super::align_up;
 use alloc::alloc::{GlobalAlloc, Layout};
 use core::mem;
 use core::ptr;
-use pc_keyboard::layouts;
 
 struct ListNode {
     size: usize,

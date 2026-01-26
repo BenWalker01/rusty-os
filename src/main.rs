@@ -7,9 +7,8 @@
 extern crate alloc;
 
 use bootloader::{BootInfo, entry_point};
-use x86_64::structures::paging::Page;
 use core::panic::PanicInfo;
-use rusty_os::{memory::{BootInfoFrameAllocator, translate_addr}, println};
+use rusty_os::println;
 use alloc::{boxed::Box, vec, vec::Vec, rc::Rc};
 
 #[cfg(not(test))]
