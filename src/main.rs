@@ -6,12 +6,12 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, rc::Rc, vec, vec::Vec};
+use alloc::{boxed::Box};
 use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use rusty_os::{
     println,
-    task::{Task, executor::Executor, keyboard, simple_executor::SimpleExecutor},
+    task::{Task, executor::Executor, keyboard},
 };
 
 async fn async_number() -> u32 {
@@ -42,16 +42,16 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     let heap_value = Box::new(41);
     println!("heap_value at {:p}", heap_value);
 
+    
+    #[cfg(test)]
+    test_main();
+    
+    println!("It did not crash!");
+
     let mut executor = Executor::new();
     executor.spawn(Task::new(example_task()));
     executor.spawn(Task::new(keyboard::print_keypresses()));
     executor.run();
-
-    #[cfg(test)]
-    test_main();
-
-    println!("It did not crash!");
-    rusty_os::hlt_loop();
 }
 
 #[cfg(not(test))]

@@ -63,7 +63,6 @@ pub fn hlt_loop() -> ! {
     }
 }
 
-/// Entry point for `cargo test`
 #[cfg(test)]
 entry_point!(test_kernel_main);
 
