@@ -12,6 +12,8 @@ pub mod vga_buffer;
 pub mod memory;
 pub mod allocator;
 pub mod task;
+pub mod ata;
+pub mod block_device;
 
 extern crate alloc;
 

@@ -23,6 +23,21 @@ async fn example_task() {
     println!("async number: {}", number);
 }
 
+async fn test_disk_read() {
+    println!("Attempting to read sector 0 from disk...");
+    let sector_data = rusty_os::ata::AtaDriver::read_sector_async(0).await;
+    
+    // Print first few bytes to verify we got data
+    println!("Sector 0 first 16 bytes:");
+    for (i, &byte) in sector_data[0..16].iter().enumerate() {
+        println!("{:02x} ", byte);
+        if (i + 1) % 8 == 0 {
+            println!();
+        }
+    }
+    println!("\nDisk read test complete");
+}
+
 entry_point!(kernel_main);
 
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
@@ -42,6 +57,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     let heap_value = Box::new(41);
     println!("heap_value at {:p}", heap_value);
 
+    // Initialize ATA driver
+    let mut ata_driver = rusty_os::ata::AtaDriver::new();
+    ata_driver.init();
+
     
     #[cfg(test)]
     test_main();
@@ -50,6 +69,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     let mut executor = Executor::new();
     executor.spawn(Task::new(example_task()));
+    executor.spawn(Task::new(test_disk_read()));
     executor.spawn(Task::new(keyboard::print_keypresses()));
     executor.run();
 }

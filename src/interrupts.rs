@@ -25,7 +25,7 @@ lazy_static! {
         }
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
-
+        idt[InterruptIndex::PrimaryATA.as_usize()].set_handler_fn(ata_primary_interrupt_handler);
 
         idt
     };
@@ -73,6 +73,15 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
     }
 }
 
+extern "x86-interrupt" fn ata_primary_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    crate::ata::on_primary_ata_interrupt();
+
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::PrimaryATA.as_u8());
+    }
+}
+
 extern "x86-interrupt" fn double_fault_handler(
     stack_frame: InterruptStackFrame,
     _error_code: u64,
@@ -85,6 +94,7 @@ extern "x86-interrupt" fn double_fault_handler(
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard,
+    PrimaryATA = PIC_1_OFFSET + 14,
 }
 
 impl InterruptIndex {
