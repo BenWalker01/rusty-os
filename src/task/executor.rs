@@ -24,6 +24,26 @@ impl Executor {
             self.sleep_if_idle();
         }
     }
+
+    pub fn run_until_idle(&mut self) {
+        use x86_64::instructions::interrupts;
+        
+        loop {
+            self.run_ready_tasks();
+            if self.task_queue.is_empty() {
+                if self.tasks.is_empty() {
+                    break;
+                }
+                interrupts::enable();
+                for _ in 0..10000 {
+                    core::hint::spin_loop();
+                }
+                interrupts::disable();
+            }
+        }
+        
+        interrupts::enable();
+    }
     pub fn spawn(&mut self, task: Task) {
         let task_id = task.id;
         if self.tasks.insert(task_id, task).is_some() {
@@ -42,7 +62,7 @@ impl Executor {
         while let Some(task_id) = task_queue.pop() {
             let task = match tasks.get_mut(&task_id) {
                 Some(task) => task,
-                None => continue, // task no longer exists
+                None => continue,
             };
             let waker = waker_cache
                 .entry(task_id)
@@ -50,7 +70,6 @@ impl Executor {
             let mut context = Context::from_waker(waker);
             match task.poll(&mut context) {
                 Poll::Ready(()) => {
-                    // task done -> remove it and its cached waker
                     tasks.remove(&task_id);
                     waker_cache.remove(&task_id);
                 }

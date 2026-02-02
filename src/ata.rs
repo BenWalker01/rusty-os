@@ -82,20 +82,16 @@ const SECTOR_SIZE: usize = 512;
 
 // ==================== State Tracking ====================
 
-/// Tracks the current state of pending disk operations
-static PENDING_LBA: AtomicU32 = AtomicU32::new(0);
-static OPERATION_COMPLETE: AtomicBool = AtomicBool::new(false);
+pub static PENDING_LBA: AtomicU32 = AtomicU32::new(0);
+pub static OPERATION_COMPLETE: AtomicBool = AtomicBool::new(false);
 
 // ==================== Async Future for Sector Reads ====================
 
-/// Future that completes when a disk sector read operation finishes
 pub struct SectorRead {
-    /// The LBA address being read
     lba: u32,
 }
 
 impl SectorRead {
-    /// Create a new SectorRead future for the given LBA
     fn new(lba: u32) -> Self {
         SectorRead { lba }
     }
@@ -112,12 +108,10 @@ impl Future for SectorRead {
             return Poll::Ready(buffer);
         }
 
-        // Register waker for when interrupt fires
         if let Ok(waker) = DISK_WAKER.try_get() {
             waker.register(&cx.waker());
         }
 
-        // Double-check after registering waker (race condition safety)
         if OPERATION_COMPLETE.load(Ordering::SeqCst) && PENDING_LBA.load(Ordering::SeqCst) == self.lba {
             OPERATION_COMPLETE.store(false, Ordering::SeqCst);
             let buffer = unsafe { *AtaDriver::get_sector_buffer() };
@@ -190,7 +184,6 @@ impl AtaDriver {
 
     fn detect_drives(&self) {
         unsafe {
-            // Select master drive
             let mut device_port: Port<u8> = Port::new(DEVICE_PORT);
             device_port.write(DEVICE_MASTER);
 
@@ -222,14 +215,51 @@ impl AtaDriver {
         Ok(())
     }
 
-    /// Asynchronously read a sector from disk
-    /// Returns a future that resolves with the sector data when the read completes
     pub async fn read_sector_async(lba: u32) -> [u8; SECTOR_SIZE] {
-        // Create a new driver instance to issue the command
-        let mut driver = AtaDriver::new();
-        let _ = driver.read_sector(lba);
+        crate::println!("[ATA] read_sector_async(LBA {})", lba);
+        
+        unsafe {
+            let mut status_port: Port<u8> = Port::new(STATUS_COMMAND_PORT);
+            let status = status_port.read();
+            crate::println!("[ATA] Current status before read: {:#04x}", status);
+        }
+        
+        PENDING_LBA.store(lba, Ordering::SeqCst);
+        OPERATION_COMPLETE.store(false, Ordering::SeqCst);
+        
+        unsafe {
+            let lba_low = (lba & 0xFF) as u8;
+            let lba_mid = ((lba >> 8) & 0xFF) as u8;
+            let lba_high = ((lba >> 16) & 0xFF) as u8;
+            let lba_upper = ((lba >> 24) & 0x0F) as u8;
 
-        SectorRead::new(lba).await
+            let mut sector_count_port: Port<u8> = Port::new(SECTOR_COUNT_PORT);
+            let mut lba_low_port: Port<u8> = Port::new(LBA_LOW_PORT);
+            let mut lba_mid_port: Port<u8> = Port::new(LBA_MID_PORT);
+            let mut lba_high_port: Port<u8> = Port::new(LBA_HIGH_PORT);
+            let mut device_port: Port<u8> = Port::new(DEVICE_PORT);
+            let mut command_port: Port<u8> = Port::new(STATUS_COMMAND_PORT);
+
+            crate::println!("[ATA] Setting: count=1, lba_low={:02x}, lba_mid={:02x}, lba_high={:02x}, upper={:02x}", 
+                lba_low, lba_mid, lba_high, lba_upper);
+            
+            sector_count_port.write(1);
+            lba_low_port.write(lba_low);
+            lba_mid_port.write(lba_mid);
+            lba_high_port.write(lba_high);
+            
+            let device_val = DEVICE_SLAVE | 0x40 | lba_upper;
+            crate::println!("[ATA] Device register: {:#04x}", device_val);
+            device_port.write(device_val);
+            
+            crate::println!("[ATA] Issuing READ command (0x20)");
+            command_port.write(CMD_READ_SECTORS);
+        }
+
+        let result = SectorRead::new(lba).await;
+        crate::println!("[ATA] Read complete: {:02x} {:02x} {:02x} {:02x}...", 
+            result[0], result[1], result[2], result[3]);
+        result
     }
 
     fn issue_read_command(&self, lba: u32) {
@@ -252,7 +282,7 @@ impl AtaDriver {
             lba_mid_port.write(lba_mid);
             lba_high_port.write(lba_high);
 
-            device_port.write(DEVICE_MASTER | 0x40 | lba_upper);
+            device_port.write(DEVICE_SLAVE | 0x40 | lba_upper);
 
             command_port.write(CMD_READ_SECTORS);
         }
@@ -281,7 +311,6 @@ pub fn on_primary_ata_interrupt() {
         let mut status_port: Port<u8> = Port::new(STATUS_COMMAND_PORT);
         let status = status_port.read();
 
-        // Check for errors
         if status & STATUS_ERR != 0 {
             let mut error_port: Port<u8> = Port::new(ERROR_PORT);
             let error = error_port.read();
@@ -290,9 +319,7 @@ pub fn on_primary_ata_interrupt() {
             return;
         }
 
-        // Check if data is ready
         if status & STATUS_DRQ != 0 {
-            // Read sector data (256 u16 words = 512 bytes)
             let mut data_port: Port<u16> = Port::new(DATA_PORT);
             let buffer = &mut *AtaDriver::get_sector_buffer_mut();
 
@@ -305,10 +332,8 @@ pub fn on_primary_ata_interrupt() {
             let lba = PENDING_LBA.load(Ordering::SeqCst);
             println!("ATA sector read complete (LBA: {})", lba);
 
-            // Mark operation as complete for the future to detect
             OPERATION_COMPLETE.store(true, Ordering::SeqCst);
 
-            // Wake any waiting task
             if let Ok(waker) = DISK_WAKER.try_get() {
                 waker.wake();
             }
