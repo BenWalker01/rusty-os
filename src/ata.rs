@@ -122,6 +122,38 @@ impl Future for SectorRead {
     }
 }
 
+pub struct SectorWrite {
+    lba: u32,
+}
+
+impl SectorWrite {
+    fn new(lba: u32) -> Self {
+        SectorWrite { lba }
+    }
+}
+
+impl Future for SectorWrite {
+    type Output = Result<(), &'static str>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if WRITE_COMPLETE.load(Ordering::SeqCst) && PENDING_LBA.load(Ordering::SeqCst) == self.lba {
+            WRITE_COMPLETE.store(false, Ordering::SeqCst);
+            return Poll::Ready(Ok(()));
+        }
+
+        if let Ok(waker) = DISK_WAKER.try_get() {
+            waker.register(&cx.waker());
+        }
+
+        if WRITE_COMPLETE.load(Ordering::SeqCst) && PENDING_LBA.load(Ordering::SeqCst) == self.lba {
+            WRITE_COMPLETE.store(false, Ordering::SeqCst);
+            return Poll::Ready(Ok(()));
+        }
+
+        Poll::Pending
+    }
+}
+
 
 #[derive(Debug, Clone, Copy)]
 pub enum DiskRequest {
@@ -132,12 +164,14 @@ pub enum DiskRequest {
 static DISK_REQUEST_QUEUE: OnceCell<ArrayQueue<DiskRequest>> = OnceCell::uninit();
 
 static mut SECTOR_BUFFER: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
+static mut SECTOR_WRITE_BUFFER: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
 
 pub static DISK_WAKER: conquer_once::spin::OnceCell<
     alloc::sync::Arc<futures_util::task::AtomicWaker>,
 > = OnceCell::uninit();
 
-// ==================== ATA Driver ====================
+pub static WRITE_COMPLETE: AtomicBool = AtomicBool::new(false);
+
 
 pub struct AtaDriver {
     initialized: bool,
@@ -150,7 +184,6 @@ impl AtaDriver {
         }
     }
 
-    /// Initialize the ATA driver
     pub fn init(&mut self) {
         if self.initialized {
             return;
@@ -262,6 +295,48 @@ impl AtaDriver {
         result
     }
 
+    pub async fn write_sector_async(lba: u32, data: &[u8; SECTOR_SIZE]) -> Result<(), &'static str> {
+        crate::println!("[ATA] write_sector_async(LBA {})", lba);
+        
+        unsafe {
+            let write_buf = &raw mut SECTOR_WRITE_BUFFER;
+            (*write_buf).copy_from_slice(data);
+        }
+        
+        PENDING_LBA.store(lba, Ordering::SeqCst);
+        WRITE_COMPLETE.store(false, Ordering::SeqCst);
+        
+        unsafe {
+            let lba_low = (lba & 0xFF) as u8;
+            let lba_mid = ((lba >> 8) & 0xFF) as u8;
+            let lba_high = ((lba >> 16) & 0xFF) as u8;
+            let lba_upper = ((lba >> 24) & 0x0F) as u8;
+
+            let mut sector_count_port: Port<u8> = Port::new(SECTOR_COUNT_PORT);
+            let mut lba_low_port: Port<u8> = Port::new(LBA_LOW_PORT);
+            let mut lba_mid_port: Port<u8> = Port::new(LBA_MID_PORT);
+            let mut lba_high_port: Port<u8> = Port::new(LBA_HIGH_PORT);
+            let mut device_port: Port<u8> = Port::new(DEVICE_PORT);
+            let mut command_port: Port<u8> = Port::new(STATUS_COMMAND_PORT);
+
+            crate::println!("[ATA] Setting up write: count=1, lba_low={:02x}, lba_mid={:02x}, lba_high={:02x}", 
+                lba_low, lba_mid, lba_high);
+            
+            sector_count_port.write(1);
+            lba_low_port.write(lba_low);
+            lba_mid_port.write(lba_mid);
+            lba_high_port.write(lba_high);
+            
+            let device_val = DEVICE_SLAVE | 0x40 | lba_upper;
+            device_port.write(device_val);
+            
+            crate::println!("[ATA] Issuing WRITE command (0x30)");
+            command_port.write(CMD_WRITE_SECTORS);
+        }
+        
+        SectorWrite::new(lba).await
+    }
+
     fn issue_read_command(&self, lba: u32) {
         unsafe {
             let lba_low = (lba & 0xFF) as u8;
@@ -314,25 +389,42 @@ pub fn on_primary_ata_interrupt() {
         if status & STATUS_ERR != 0 {
             let mut error_port: Port<u8> = Port::new(ERROR_PORT);
             let error = error_port.read();
-            println!("ATA read error: {:#x}", error);
+            println!("ATA error: {:#x}", error);
             OPERATION_COMPLETE.store(false, Ordering::SeqCst);
+            WRITE_COMPLETE.store(false, Ordering::SeqCst);
             return;
         }
 
         if status & STATUS_DRQ != 0 {
             let mut data_port: Port<u16> = Port::new(DATA_PORT);
-            let buffer = &mut *AtaDriver::get_sector_buffer_mut();
+            
+            let is_write = WRITE_COMPLETE.load(Ordering::SeqCst) == false && 
+                          OPERATION_COMPLETE.load(Ordering::SeqCst) == true;
+            
+            if is_write {
+                let write_buffer = &raw const SECTOR_WRITE_BUFFER;
+                for i in 0..256 {
+                    let byte1 = (*write_buffer)[i * 2] as u16;
+                    let byte2 = (*write_buffer)[i * 2 + 1] as u16;
+                    let word = byte1 | (byte2 << 8);
+                    data_port.write(word);
+                }
+                
+                let lba = PENDING_LBA.load(Ordering::SeqCst);
+                println!("ATA sector write complete (LBA: {})", lba);
+                WRITE_COMPLETE.store(true, Ordering::SeqCst);
+            } else {
+                let buffer = &mut *AtaDriver::get_sector_buffer_mut();
+                for i in 0..256 {
+                    let word = data_port.read();
+                    buffer[i * 2] = (word & 0xFF) as u8;
+                    buffer[i * 2 + 1] = (word >> 8) as u8;
+                }
 
-            for i in 0..256 {
-                let word = data_port.read();
-                buffer[i * 2] = (word & 0xFF) as u8;
-                buffer[i * 2 + 1] = (word >> 8) as u8;
+                let lba = PENDING_LBA.load(Ordering::SeqCst);
+                println!("ATA sector read complete (LBA: {})", lba);
+                OPERATION_COMPLETE.store(true, Ordering::SeqCst);
             }
-
-            let lba = PENDING_LBA.load(Ordering::SeqCst);
-            println!("ATA sector read complete (LBA: {})", lba);
-
-            OPERATION_COMPLETE.store(true, Ordering::SeqCst);
 
             if let Ok(waker) = DISK_WAKER.try_get() {
                 waker.wake();

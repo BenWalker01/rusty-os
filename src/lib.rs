@@ -14,6 +14,7 @@ pub mod allocator;
 pub mod task;
 pub mod ata;
 pub mod block_device;
+pub mod fs;
 
 extern crate alloc;
 

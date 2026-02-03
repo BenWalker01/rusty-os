@@ -54,8 +54,10 @@ fn test_simple_sector_read() {
         
         println!("Byte 0 = {:#x} (decimal {})", sector[0], sector[0]);
         
-        assert_eq!(sector[0], 0x00, "Expected 0x00, got {:#x}", sector[0]);
-        assert_eq!(sector[1], 0x01, "Expected 0x01, got {:#x}", sector[1]);
+        // FAT32 boot sector verification
+        assert_eq!(sector[0], 0xEB, "Expected 0xEB (FAT32 jump), got {:#x}", sector[0]);
+        assert_eq!(sector[1], 0x58, "Expected 0x58, got {:#x}", sector[1]);
+        assert_eq!(sector[2], 0x90, "Expected 0x90, got {:#x}", sector[2]);
         
         println!("Test passed!");
     }
